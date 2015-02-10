@@ -71,7 +71,7 @@ type dailyTest struct {
 var tests = []dailyTest{
 	{
 		name:    "traceroute6",
-		cmdFmt:  "traceroute6 -w1 -n %[1]s",
+		cmdFmt:  "traceroute6 -n %[1]s",
 		formURL: "https://ipv6.he.net/certification/daily.php?test=traceroute",
 	},
 	{
@@ -134,11 +134,11 @@ func main() {
 		wg.Add(1)
 		go func(t dailyTest) {
 			cmd := fmt.Sprintf(t.cmdFmt, *host, ip)
-			log.Printf("Running '%s' (%s)", t.name, cmd)
+			log.Printf("Running test '%s' with cmd: %s", t.name, cmd)
 			defer wg.Done()
 			out, err := runCmd(cmd)
 			if err != nil {
-				log.Fatal(err)
+				log.Printf("Couldn't run command '%s': %s", cmd ,  err)
 				return
 			}
 			log.Printf("Submitting '%s' to '%s'", t.name, t.formURL)
@@ -150,6 +150,7 @@ func main() {
 			resp, err := client.PostForm(t.formURL, v)
 			if err != nil {
 				log.Printf("Could not submit '%s': %s", t.name, err)
+				return
 			}
 			if resp.StatusCode != 200 {
 				log.Printf("Could not submit '%s' got status '%s'", t.name, resp.Status)
