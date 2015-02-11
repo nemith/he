@@ -3,21 +3,26 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
-	"net"
+	"math/rand"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"code.google.com/p/go-shlex"
+	"github.com/golang/glog"
 )
 
 var username = flag.String("username", "", "HE Certification Username")
 var password = flag.String("password", "", "HE Certification Password")
-var host = flag.String("host", "", "IPv6 hostname to be used (must be hostname and not IP!)")
+var dryrun = flag.Bool("dryrun", false, "Don't submit to HE")
+
+func init() {
+	rand.Seed(time.Now().Unix())
+}
 
 func HELogin(user, pass string) (*http.Client, error) {
 	jar, err := cookiejar.New(nil)
@@ -96,67 +101,86 @@ var tests = []dailyTest{
 	},
 }
 
-func lookupIPv6(host string) (string, error) {
-	addrs, err := net.LookupIP(host)
-	if err != nil {
-		return "", err
-	}
+func randomSite() *ipv6Site {
+	r := rand.Intn(len(v6Sites) - 1)
+	return &v6Sites[r]
+}
 
-	for _, addr := range addrs {
-		if addr.To4() == nil {
-			return addr.String(), nil
-		}
+func isAlive(ip string) bool {
+	cmd := exec.Command("ping6", "-c1", ip)
+	if err := cmd.Start(); err == nil {
+		return true
 	}
-	return "", fmt.Errorf("Could not find IPv6 address for '%s'", host)
+	return false
 }
 
 func main() {
 
 	flag.Parse()
 
-	if flag.NFlag() != 3 {
-		fmt.Fprintf(os.Stderr, "Please specify all arguments")
+	if *username == "" || *password == "" {
+		fmt.Fprintf(os.Stderr, "Please specify username and password arguments\n\n")
 		flag.Usage()
+		os.Exit(1)
 	}
 
 	client, err := HELogin(*username, *password)
 	if err != nil {
-		log.Fatal(err)
+		glog.Fatal(err)
 	}
 
-	ip, err := lookupIPv6(*host)
-	if err != nil {
-		log.Fatal(err)
+	var site *ipv6Site
+	for i := 0; i <= 25; i++ {
+		site = randomSite()
+		glog.Infof("Found site '%s'.  Testing to see if alive.", site.host)
+		if isAlive(site.addr) {
+			break
+		}
+		glog.Info("Site '%s' was not alive. Skipping,", site.host)
 	}
+	glog.Infof("Found random v6 site '%s', '%s'", site.host, site.addr)
 
 	var wg sync.WaitGroup
 	for _, test := range tests {
 		wg.Add(1)
 		go func(t dailyTest) {
-			cmd := fmt.Sprintf(t.cmdFmt, *host, ip)
-			log.Printf("Running test '%s' with cmd: %s", t.name, cmd)
+			cmd := fmt.Sprintf(t.cmdFmt, site.host, site.addr)
+			glog.Infof("Running '%s' with cmd ''%s'", t.name, cmd)
 			defer wg.Done()
 			out, err := runCmd(cmd)
 			if err != nil {
-				log.Printf("Couldn't run command '%s': %s", cmd ,  err)
-				return
-			}
-			log.Printf("Submitting '%s' to '%s'", t.name, t.formURL)
-
-			v := url.Values{
-				"input": []string{string(out)},
-			}
-
-			resp, err := client.PostForm(t.formURL, v)
-			if err != nil {
-				log.Printf("Could not submit '%s': %s", t.name, err)
-				return
-			}
-			if resp.StatusCode != 200 {
-				log.Printf("Could not submit '%s' got status '%s'", t.name, resp.Status)
+				glog.Infof("Failed to run cmd '%s'", cmd)
+				glog.Info(string(out))
+				glog.Fatal(err)
 				return
 			}
 
+			glog.Infof("Command output for '%s'", t.name)
+			glog.Info(string(out))
+
+			var dryrunLog string
+			if *dryrun {
+				dryrunLog = "DRYRUN -- "
+			}
+
+			glog.Infof("%sSubmitting '%s' to '%s'", dryrunLog, t.name, t.formURL)
+
+			if !*dryrun {
+				v := url.Values{
+					"input": []string{string(out)},
+				}
+
+				resp, err := client.PostForm(t.formURL, v)
+				if err != nil {
+					glog.Errorf("Could not submit '%s': %s", t.name, err)
+					return
+				}
+				if resp.StatusCode != 200 {
+					glog.Errorf("Could not submit '%s' got status '%s'", t.name, resp.Status)
+					return
+				}
+
+			}
 		}(test)
 
 	}
