@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"code.google.com/p/go-shlex"
 	"github.com/golang/glog"
+	"github.com/google/shlex"
 )
 
 var username = flag.String("username", "", "HE Certification Username")
