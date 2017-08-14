@@ -108,10 +108,7 @@ func randomSite() *ipv6Site {
 
 func isAlive(ip string) bool {
 	cmd := exec.Command("ping6", "-c1", ip)
-	if err := cmd.Start(); err == nil {
-		return true
-	}
-	return false
+	return cmd.Run() == nil
 }
 
 func main() {
